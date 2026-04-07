@@ -1,0 +1,88 @@
+name: Build Multi-Arch from Latest Release
+
+on:
+  schedule:
+    - cron: '0 1 * * *' # Chạy lúc 1h sáng mỗi ngày
+  workflow_dispatch:      # Cho phép chạy thủ công
+
+jobs:
+  check-and-build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+
+    steps:
+      - name: Checkout your repo
+        uses: actions/checkout@v4
+
+      - name: Get Latest Release Tag
+        id: get_release
+        run: |
+          # Lấy tag name của release mới nhất từ GitHub API
+          LATEST_TAG=$(curl -s https://api.github.com/repos/chriswritescode-dev/opencode-manager/releases/latest | jq -r .tag_name)
+          echo "tag=$LATEST_TAG" >> $GITHUB_OUTPUT
+          echo "Phiên bản mới nhất trên Upstream là: $LATEST_TAG"
+
+      - name: Check if build is needed
+        id: check
+        run: |
+          if [ -f version.txt ] && [ "$(cat version.txt)" == "${{ steps.get_release.outputs.tag }}" ]; then
+            echo "should_build=false" >> $GITHUB_OUTPUT
+            echo "Đã ở phiên bản mới nhất (${{ steps.get_release.outputs.tag }}). Bỏ qua."
+          else
+            echo "should_build=true" >> $GITHUB_OUTPUT
+            echo "Phát hiện bản release mới! Bắt đầu chuẩn bị build..."
+          fi
+
+      - name: Fetch Release Source Code
+        if: steps.check.outputs.should_build == 'true'
+        run: |
+          # Tải source code của đúng Tag đó
+          wget https://github.com/chriswritescode-dev/opencode-manager/archive/refs/tags/${{ steps.get_release.outputs.tag }}.tar.gz
+          tar -xzf ${{ steps.get_release.outputs.tag }}.tar.gz --strip-components=1
+          rm ${{ steps.get_release.outputs.tag }}.tar.gz
+          
+          # Đảm bảo Dockerfile của bạn được áp dụng (ghi đè Dockerfile gốc nếu cần)
+          # Lưu ý: Bạn nên để file Dockerfile tối ưu ở một thư mục như 'docker/Dockerfile' 
+          # để không bị lệnh xóa code phía trên làm mất.
+          cp .github/docker/Dockerfile ./Dockerfile || echo "Sử dụng Dockerfile mặc định trong source"
+
+      - name: Set up QEMU
+        if: steps.check.outputs.should_build == 'true'
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        if: steps.check.outputs.should_build == 'true'
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container Registry
+        if: steps.check.outputs.should_build == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and Push Multi-Arch
+        if: steps.check.outputs.should_build == 'true'
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository }}:latest
+            ghcr.io/${{ github.repository }}:${{ steps.get_release.outputs.tag }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Update Version Tracking
+        if: steps.check.outputs.should_build == 'true'
+        run: |
+          echo "${{ steps.get_release.outputs.tag }}" > version.txt
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add version.txt
+          git commit -m "Build hoàn tất cho phiên bản: ${{ steps.get_release.outputs.tag }}"
+          git push
