@@ -19,7 +19,6 @@ services:
     volumes:
       - opencode-data:/app/data  
       - opencode-workspace:/workspace
-      - opencode-config:/home/node/.config/opencode
     deploy:
       resources:
         limits:
@@ -36,6 +35,4 @@ volumes:
   opencode-data:
     driver: local
   opencode-workspace:
-    driver: local
-  opencode-config:
     driver: local
