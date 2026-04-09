@@ -1,0 +1,38 @@
+services:
+  opencode-manager:
+    image: ghcr.io/hung319/opencode-manager-docker:latest
+    pull_policy: always
+    container_name: opencode-manager
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - HOST=0.0.0.0
+      - PORT=5003
+      - AUTH_SECRET=my_super_secret_key_123_generate_with_openssl
+      - ADMIN_EMAIL=admin@example.com
+      - ADMIN_PASSWORD=your_secure_password
+      - AUTH_TRUSTED_ORIGINS=http://localhost:5003
+      - PASSKEY_ORIGIN=http://localhost:5003
+      - AUTH_SECURE_COOKIES=false
+      - DATABASE_PATH=/app/data/opencode.db
+      - WORKSPACE_PATH=/workspace
+    volumes:
+      - opencode-data:/app/data  
+      - opencode-workspace:/workspace
+    deploy:
+      resources:
+        limits:
+          memory: 1.5G
+        reservations:
+          memory: 512M
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5003/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+volumes:
+  opencode-data:
+    driver: local
+  opencode-workspace:
+    driver: local
