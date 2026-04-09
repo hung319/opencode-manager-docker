@@ -15,10 +15,11 @@ services:
       - PASSKEY_ORIGIN=http://localhost:5003
       - AUTH_SECURE_COOKIES=false
       - DATABASE_PATH=/app/data/opencode.db
-      - WORKSPACE_PATH=/workspace
+      - WORKSPACE_PATH=/home/node/workspace
     volumes:
       - opencode-data:/app/data  
-      - opencode-workspace:/workspace
+      - opencode-workspace:/home/node/workspace
+      - opencode-config:/home/node/.config/opencode
     deploy:
       resources:
         limits:
@@ -35,4 +36,6 @@ volumes:
   opencode-data:
     driver: local
   opencode-workspace:
+    driver: local
+  opencode-config:
     driver: local
