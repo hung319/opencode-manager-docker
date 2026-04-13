@@ -14,11 +14,10 @@ services:
       - AUTH_TRUSTED_ORIGINS=http://localhost:5003
       - PASSKEY_ORIGIN=http://localhost:5003
       - AUTH_SECURE_COOKIES=false
-      - DATABASE_PATH=/app/data/opencode.db
-      - WORKSPACE_PATH=/workspace
+      - DATABASE_PATH=/root/data/opencode.db
+      - WORKSPACE_PATH=/root/workspace
     volumes:
-      - opencode-data:/app/data  
-      - opencode-workspace:/workspace
+      - opencode-manager:/root
     deploy:
       resources:
         limits:
@@ -26,7 +25,6 @@ services:
         reservations:
           memory: 512M
 volumes:
-  opencode-data:
+  opencode-manager:
     driver: local
-  opencode-workspace:
-    driver: local
+  
