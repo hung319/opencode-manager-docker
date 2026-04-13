@@ -27,7 +27,11 @@ jobs:
       - name: Check if build is needed
         id: check
         run: |
-          if [ -f version.txt ] && [ "$(cat version.txt)" == "${{ steps.get_release.outputs.tag }}" ]; then
+          # Kiểm tra nếu được kích hoạt thủ công (workflow_dispatch)
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            echo "should_build=true" >> $GITHUB_OUTPUT
+            echo "Chạy thủ công. Ép buộc build lại và bỏ qua check phiên bản!"
+          elif [ -f version.txt ] && [ "$(cat version.txt)" == "${{ steps.get_release.outputs.tag }}" ]; then
             echo "should_build=false" >> $GITHUB_OUTPUT
             echo "Đã ở phiên bản mới nhất (${{ steps.get_release.outputs.tag }}). Bỏ qua."
           else
@@ -43,10 +47,20 @@ jobs:
           tar -xzf ${{ steps.get_release.outputs.tag }}.tar.gz --strip-components=1
           rm ${{ steps.get_release.outputs.tag }}.tar.gz
           
-          # Đảm bảo Dockerfile của bạn được áp dụng (ghi đè Dockerfile gốc nếu cần)
-          # Lưu ý: Bạn nên để file Dockerfile tối ưu ở một thư mục như 'docker/Dockerfile' 
-          # để không bị lệnh xóa code phía trên làm mất.
+          # Ghi đè Dockerfile tùy chỉnh của bạn
           cp .github/docker/Dockerfile ./Dockerfile || echo "Sử dụng Dockerfile mặc định trong source"
+          
+          # TỰ ĐỘNG SỬA DOCKER-ENTRYPOINT.SH ĐỂ TƯƠNG THÍCH QUYỀN ROOT
+          if [ -f scripts/docker-entrypoint.sh ]; then
+            echo "Đang cập nhật docker-entrypoint.sh để chạy quyền root..."
+            # Thay đổi HOME từ /home/node thành /root
+            sed -i 's/export HOME=\/home\/node/export HOME=\/root/g' scripts/docker-entrypoint.sh
+            sed -i 's/\/home\/node/\/root/g' scripts/docker-entrypoint.sh
+            # Vô hiệu hóa lệnh chown node:node
+            sed -i 's/chown -R node:node.*/# Bỏ chown vì chạy bằng root/g' scripts/docker-entrypoint.sh
+            # Đổi lệnh chạy cuối cùng để không hạ quyền xuống user node
+            sed -i 's/exec runuser -u node -- "$@"/exec "$@"/g' scripts/docker-entrypoint.sh
+          fi
 
       - name: Set up QEMU
         if: steps.check.outputs.should_build == 'true'
@@ -84,5 +98,6 @@ jobs:
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
           git add version.txt
-          git commit -m "Build hoàn tất cho phiên bản: ${{ steps.get_release.outputs.tag }}"
-          git push
+          # Dùng || true để tránh lỗi git commit nếu chạy thủ công mà version không đổi
+          git commit -m "Build hoàn tất cho phiên bản: ${{ steps.get_release.outputs.tag }}" || true
+          git push || true
