@@ -52,12 +52,12 @@ COPY --from=builder /app/frontend/dist ./frontend/dist
 COPY package.json pnpm-workspace.yaml ./
 COPY scripts/docker-entrypoint.sh /docker-entrypoint.sh
 
+# Cập nhật: Tạo thư mục workspace và data trong /root, bỏ phân quyền user node
 RUN chmod +x /docker-entrypoint.sh \
     && mkdir -p /app/backend/node_modules/@opencode-manager \
     && ln -s /app/shared /app/backend/node_modules/@opencode-manager/shared \
-    && mkdir -p /workspace /app/data \
-    && chown -R node:node /workspace /app/data /app
+    && mkdir -p /root/workspace /root/data
 
-USER node
+# Mặc định container chạy dưới quyền root (Không cần khai báo USER)
 ENTRYPOINT ["/docker-entrypoint.sh"]
 CMD ["bun", "backend/src/index.ts"]
