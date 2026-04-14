@@ -38,6 +38,10 @@ RUN pnpm install --frozen-lockfile --prod
 # ==========================================
 FROM debian:bookworm-slim AS downloader
 ARG OPENCODE_VERSION=latest
+
+# THÊM DÒNG NÀY: Dùng để phá cache khi build
+ARG CACHE_BUST=1
+
 RUN apt-get update && apt-get install -y curl ca-certificates bash
 
 # Tải UV & gom file
@@ -46,7 +50,7 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | UV_NO_MODIFY_PATH=1 sh \
     && mv /root/.local/bin/uv /out/usr/local/bin/uv \
     && mv /root/.local/bin/uvx /out/usr/local/bin/uvx
 
-# Tải Opencode & gom file
+# Tải Opencode & gom file (Nhờ có CACHE_BUST phía trên, lệnh này sẽ luôn kéo bản mới nhất)
 RUN curl -fsSL https://opencode.ai/install | bash -s -- --no-modify-path $( [ "${OPENCODE_VERSION}" != "latest" ] && echo "--version ${OPENCODE_VERSION}" ) \
     && mv /root/.opencode /out/opt-opencode
 
