@@ -90,6 +90,9 @@ jobs:
             ghcr.io/${{ github.repository }}:${{ steps.get_release.outputs.tag }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          # THÊM 2 DÒNG NÀY ĐỂ TRUYỀN BIẾN PHÁ CACHE
+          build-args: |
+            CACHE_BUST=${{ github.run_id }}
 
       - name: Update Version Tracking
         if: steps.check.outputs.should_build == 'true'
