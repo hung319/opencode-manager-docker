@@ -88,7 +88,7 @@ COPY scripts/docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod +x /docker-entrypoint.sh \
     && mkdir -p /app/backend/node_modules/@opencode-manager \
     && ln -s /app/shared /app/backend/node_modules/@opencode-manager/shared \
-    && mkdir -p /root/data
+    && mkdir -p /root/data /root/workspace
 
 ENTRYPOINT ["/docker-entrypoint.sh"]
 CMD ["bun", "backend/src/index.ts"]
