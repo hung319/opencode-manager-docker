@@ -6,7 +6,7 @@ RUN corepack enable && corepack prepare pnpm@latest --activate
 WORKDIR /app
 
 # ==========================================
-# 2. DEPENDENCIES STAGE: Cài đặt toàn bộ gói (gồm cả DevDeps để build)
+# 2. DEPENDENCIES STAGE: Cài đặt toàn bộ gói
 # ==========================================
 FROM base AS deps
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
@@ -16,52 +16,50 @@ COPY frontend/package.json ./frontend/
 RUN pnpm install --frozen-lockfile
 
 # ==========================================
-# 3. BUILDER STAGE: Build code (Frontend/Shared)
+# 3. BUILDER STAGE: Build code
 # ==========================================
 FROM deps AS builder
 COPY . .
 RUN pnpm --filter frontend build
 
 # ==========================================
-# 4. PROD-DEPS STAGE: Cài đặt gói Production (Tối ưu dung lượng)
+# 4. PROD-DEPS STAGE: Gói Production
 # ==========================================
 FROM base AS prod-deps
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY shared/package.json ./shared/
 COPY backend/package.json ./backend/
 COPY frontend/package.json ./frontend/
-# Lệnh --prod giúp loại bỏ hàng trăm MB của devDependencies
 RUN pnpm install --frozen-lockfile --prod
 
 # ==========================================
-# 5. DOWNLOADER STAGE: Tải tools độc lập để tránh file rác
+# 5. DOWNLOADER STAGE: Tải tools (Xử lý Cache triệt để)
 # ==========================================
 FROM debian:bookworm-slim AS downloader
 ARG OPENCODE_VERSION=latest
-
-# THÊM DÒNG NÀY: Dùng để phá cache khi build
 ARG CACHE_BUST=1
 
 RUN apt-get update && apt-get install -y curl ca-certificates bash
 
-# Tải UV & gom file
+# Tải UV
 RUN curl -LsSf https://astral.sh/uv/install.sh | UV_NO_MODIFY_PATH=1 sh \
     && mkdir -p /out/usr/local/bin \
     && mv /root/.local/bin/uv /out/usr/local/bin/uv \
     && mv /root/.local/bin/uvx /out/usr/local/bin/uvx
 
-# Tải Opencode & gom file (Nhờ có CACHE_BUST phía trên, lệnh này sẽ luôn kéo bản mới nhất)
-RUN curl -fsSL https://opencode.ai/install | bash -s -- --no-modify-path $( [ "${OPENCODE_VERSION}" != "latest" ] && echo "--version ${OPENCODE_VERSION}" ) \
-    && mv /root/.opencode /out/opt-opencode
+# Lệnh này sẽ luôn chạy lại nếu CACHE_BUST từ GitHub Action thay đổi
+RUN echo "Fetching Opencode with Bust ID: ${CACHE_BUST}" && \
+    curl -fsSL https://opencode.ai/install | bash -s -- --no-modify-path $( [ "${OPENCODE_VERSION}" != "latest" ] && echo "--version ${OPENCODE_VERSION}" ) \
+    && mkdir -p /out/opt-opencode \
+    && cp -R /root/.opencode/* /out/opt-opencode/ || mv /root/.opencode /out/opt-opencode
 
 # ==========================================
-# 6. RUNNER STAGE: Môi trường chạy cuối cùng
+# 6. RUNNER STAGE: Môi trường cuối cùng
 # ==========================================
 FROM node:24.13.0-slim AS runner
 WORKDIR /app
 ENV NODE_ENV=production HOST=0.0.0.0 PORT=5003
 
-# Gộp chung việc cài các công cụ hệ thống và dọn dẹp vào 1 layer duy nhất
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git curl lsof ripgrep ca-certificates grep gawk sed findutils bash \
     coreutils procps jq less tree file python3 python3-pip python3-venv \
@@ -73,14 +71,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && ln -s /root/.bun/bin/bun /usr/local/bin/bun \
     && rm -rf /root/.bun/install
 
-# Chỉ Copy những thứ thật sự cần thiết từ các Stage trước
 COPY --from=downloader /out/usr/local/bin/ /usr/local/bin/
 COPY --from=downloader /out/opt-opencode /opt/opencode
 RUN chmod +x /usr/local/bin/uv /usr/local/bin/uvx \
     && chmod -R 755 /opt/opencode \
     && ln -s /opt/opencode/bin/opencode /usr/local/bin/opencode
 
-# Copy bộ node_modules siêu nhẹ (chỉ có dependencies)
 COPY --from=prod-deps /app/node_modules ./node_modules
 COPY --from=builder /app/shared ./shared
 COPY --from=builder /app/backend ./backend
@@ -88,7 +84,6 @@ COPY --from=builder /app/frontend/dist ./frontend/dist
 COPY package.json pnpm-workspace.yaml ./
 COPY scripts/docker-entrypoint.sh /docker-entrypoint.sh
 
-# Cấu hình workspace và quyền thực thi
 RUN chmod +x /docker-entrypoint.sh \
     && mkdir -p /app/backend/node_modules/@opencode-manager \
     && ln -s /app/shared /app/backend/node_modules/@opencode-manager/shared \
