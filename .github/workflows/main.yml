@@ -2,8 +2,8 @@ name: Build Multi-Arch from Latest Release
 
 on:
   schedule:
-    - cron: '0 1 * * *' # Chạy lúc 1h sáng mỗi ngày
-  workflow_dispatch:      # Cho phép chạy thủ công
+    - cron: '0 1 * * *'
+  workflow_dispatch:
 
 jobs:
   check-and-build:
@@ -19,7 +19,6 @@ jobs:
       - name: Get Latest Release Tag
         id: get_release
         run: |
-          # Lấy tag name của release mới nhất từ GitHub API
           LATEST_TAG=$(curl -s https://api.github.com/repos/chriswritescode-dev/opencode-manager/releases/latest | jq -r .tag_name)
           echo "tag=$LATEST_TAG" >> $GITHUB_OUTPUT
           echo "Phiên bản mới nhất trên Upstream là: $LATEST_TAG"
@@ -27,38 +26,27 @@ jobs:
       - name: Check if build is needed
         id: check
         run: |
-          # Kiểm tra nếu được kích hoạt thủ công (workflow_dispatch)
           if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
             echo "should_build=true" >> $GITHUB_OUTPUT
-            echo "Chạy thủ công. Ép buộc build lại và bỏ qua check phiên bản!"
           elif [ -f version.txt ] && [ "$(cat version.txt)" == "${{ steps.get_release.outputs.tag }}" ]; then
             echo "should_build=false" >> $GITHUB_OUTPUT
-            echo "Đã ở phiên bản mới nhất (${{ steps.get_release.outputs.tag }}). Bỏ qua."
           else
             echo "should_build=true" >> $GITHUB_OUTPUT
-            echo "Phát hiện bản release mới! Bắt đầu chuẩn bị build..."
           fi
 
       - name: Fetch Release Source Code
         if: steps.check.outputs.should_build == 'true'
         run: |
-          # Tải source code của đúng Tag đó
           wget https://github.com/chriswritescode-dev/opencode-manager/archive/refs/tags/${{ steps.get_release.outputs.tag }}.tar.gz
           tar -xzf ${{ steps.get_release.outputs.tag }}.tar.gz --strip-components=1
           rm ${{ steps.get_release.outputs.tag }}.tar.gz
           
-          # Ghi đè Dockerfile tùy chỉnh của bạn
-          cp .github/docker/Dockerfile ./Dockerfile || echo "Sử dụng Dockerfile mặc định trong source"
+          cp .github/docker/Dockerfile ./Dockerfile || echo "Sử dụng Dockerfile mặc định"
           
-          # TỰ ĐỘNG SỬA DOCKER-ENTRYPOINT.SH ĐỂ TƯƠNG THÍCH QUYỀN ROOT
           if [ -f scripts/docker-entrypoint.sh ]; then
-            echo "Đang cập nhật docker-entrypoint.sh để chạy quyền root..."
-            # Thay đổi HOME từ /home/node thành /root
             sed -i 's/export HOME=\/home\/node/export HOME=\/root/g' scripts/docker-entrypoint.sh
             sed -i 's/\/home\/node/\/root/g' scripts/docker-entrypoint.sh
-            # Vô hiệu hóa lệnh chown node:node
-            sed -i 's/chown -R node:node.*/# Bỏ chown vì chạy bằng root/g' scripts/docker-entrypoint.sh
-            # Đổi lệnh chạy cuối cùng để không hạ quyền xuống user node
+            sed -i 's/chown -R node:node.*/# Root user bypass/g' scripts/docker-entrypoint.sh
             sed -i 's/exec runuser -u node -- "$@"/exec "$@"/g' scripts/docker-entrypoint.sh
           fi
 
@@ -70,7 +58,7 @@ jobs:
         if: steps.check.outputs.should_build == 'true'
         uses: docker/setup-buildx-action@v3
 
-      - name: Login to GitHub Container Registry
+      - name: Login to GHCR
         if: steps.check.outputs.should_build == 'true'
         uses: docker/login-action@v3
         with:
@@ -90,9 +78,9 @@ jobs:
             ghcr.io/${{ github.repository }}:${{ steps.get_release.outputs.tag }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          # THÊM 2 DÒNG NÀY ĐỂ TRUYỀN BIẾN PHÁ CACHE
           build-args: |
             CACHE_BUST=${{ github.run_id }}
+            OPENCODE_VERSION=latest
 
       - name: Update Version Tracking
         if: steps.check.outputs.should_build == 'true'
@@ -101,6 +89,5 @@ jobs:
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
           git add version.txt
-          # Dùng || true để tránh lỗi git commit nếu chạy thủ công mà version không đổi
-          git commit -m "Build hoàn tất cho phiên bản: ${{ steps.get_release.outputs.tag }}" || true
+          git commit -m "Build: ${{ steps.get_release.outputs.tag }}" || true
           git push || true
