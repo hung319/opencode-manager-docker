@@ -34,22 +34,6 @@ jobs:
             echo "should_build=true" >> $GITHUB_OUTPUT
           fi
 
-      - name: Fetch Release Source Code
-        if: steps.check.outputs.should_build == 'true'
-        run: |
-          wget https://github.com/chriswritescode-dev/opencode-manager/archive/refs/tags/${{ steps.get_release.outputs.tag }}.tar.gz
-          tar -xzf ${{ steps.get_release.outputs.tag }}.tar.gz --strip-components=1
-          rm ${{ steps.get_release.outputs.tag }}.tar.gz
-          
-          cp .github/docker/Dockerfile ./Dockerfile || echo "Sử dụng Dockerfile mặc định"
-          
-          if [ -f scripts/docker-entrypoint.sh ]; then
-            sed -i 's/export HOME=\/home\/node/export HOME=\/root/g' scripts/docker-entrypoint.sh
-            sed -i 's/\/home\/node/\/root/g' scripts/docker-entrypoint.sh
-            sed -i 's/chown -R node:node.*/# Root user bypass/g' scripts/docker-entrypoint.sh
-            sed -i 's/exec runuser -u node -- "$@"/exec "$@"/g' scripts/docker-entrypoint.sh
-          fi
-
       - name: Set up QEMU
         if: steps.check.outputs.should_build == 'true'
         uses: docker/setup-qemu-action@v3
