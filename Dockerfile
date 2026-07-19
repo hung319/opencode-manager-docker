@@ -1,93 +1,48 @@
-# ==========================================
-# 1. BASE STAGE: Cài đặt cơ bản & Pnpm
-# ==========================================
-FROM node:24.13.0-slim AS base
-RUN corepack enable && corepack prepare pnpm@latest --activate
-WORKDIR /app
+FROM ghcr.io/chriswritescode-dev/opencode-manager:latest
 
-# ==========================================
-# 2. DEPENDENCIES STAGE: Cài đặt toàn bộ gói
-# ==========================================
-FROM base AS deps
-COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
-COPY shared/package.json ./shared/
-COPY backend/package.json ./backend/
-COPY frontend/package.json ./frontend/
-RUN pnpm install --frozen-lockfile
-
-# ==========================================
-# 3. BUILDER STAGE: Build code
-# ==========================================
-FROM deps AS builder
-COPY . .
-RUN pnpm --filter frontend build
-
-# ==========================================
-# 4. PROD-DEPS STAGE: Gói Production
-# ==========================================
-FROM base AS prod-deps
-COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
-COPY shared/package.json ./shared/
-COPY backend/package.json ./backend/
-COPY frontend/package.json ./frontend/
-RUN pnpm install --frozen-lockfile --prod
-
-# ==========================================
-# 5. DOWNLOADER STAGE: Tải tools (Xử lý Cache triệt để)
-# ==========================================
-FROM debian:bookworm-slim AS downloader
-ARG OPENCODE_VERSION=latest
-ARG CACHE_BUST=1
-
-RUN apt-get update && apt-get install -y curl ca-certificates bash
-
-# Tải UV
-RUN curl -LsSf https://astral.sh/uv/install.sh | UV_NO_MODIFY_PATH=1 sh \
-    && mkdir -p /out/usr/local/bin \
-    && mv /root/.local/bin/uv /out/usr/local/bin/uv \
-    && mv /root/.local/bin/uvx /out/usr/local/bin/uvx
-
-# Lệnh này sẽ luôn chạy lại nếu CACHE_BUST từ GitHub Action thay đổi
-RUN echo "Fetching Opencode with Bust ID: ${CACHE_BUST}" && \
-    curl -fsSL https://opencode.ai/install | bash -s -- --no-modify-path $( [ "${OPENCODE_VERSION}" != "latest" ] && echo "--version ${OPENCODE_VERSION}" ) \
-    && mkdir -p /out/opt-opencode \
-    && cp -R /root/.opencode/* /out/opt-opencode/ || mv /root/.opencode /out/opt-opencode
-
-# ==========================================
-# 6. RUNNER STAGE: Môi trường cuối cùng
-# ==========================================
-FROM node:24.13.0-slim AS runner
-WORKDIR /app
-ENV NODE_ENV=production HOST=0.0.0.0 PORT=5003
+USER root
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    git curl lsof ripgrep ca-certificates grep gawk sed findutils bash \
-    coreutils procps jq less tree file python3 python3-pip python3-venv \
-    && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
-    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
-    && apt-get update && apt-get install -y --no-install-recommends gh \
-    && apt-get clean && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* \
-    && curl -fsSL https://bun.sh/install | bash \
-    && ln -s /root/.bun/bin/bun /usr/local/bin/bun \
-    && rm -rf /root/.bun/install
+    psmisc unzip ca-certificates tini lsof curl \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-COPY --from=downloader /out/usr/local/bin/ /usr/local/bin/
-COPY --from=downloader /out/opt-opencode /opt/opencode
-RUN chmod +x /usr/local/bin/uv /usr/local/bin/uvx \
-    && chmod -R 755 /opt/opencode \
-    && ln -s /opt/opencode/bin/opencode /usr/local/bin/opencode
+WORKDIR /app
 
-COPY --from=prod-deps /app/node_modules ./node_modules
-COPY --from=builder /app/shared ./shared
-COPY --from=builder /app/backend ./backend
-COPY --from=builder /app/frontend/dist ./frontend/dist
-COPY package.json pnpm-workspace.yaml ./
-COPY scripts/docker-entrypoint.sh /docker-entrypoint.sh
+ENV NODE_ENV=production \
+    HOST=0.0.0.0 \
+    PORT=7860 \
+    OPENCODE_SERVER_PORT=5551 \
+    HOME=/root \
+    AUTH_SECRET="super-secret-key-change-me" \
+    AUTH_TRUSTED_ORIGINS="http://localhost:7860" \
+    AUTH_SECURE_COOKIES=true \
+    DATABASE_PATH=/root/data/opencode.db \
+    WORKSPACE_PATH=/root \
+    XDG_CACHE_HOME=/root/.cache
 
-RUN chmod +x /docker-entrypoint.sh \
-    && mkdir -p /app/backend/node_modules/@opencode-manager \
-    && ln -s /app/shared /app/backend/node_modules/@opencode-manager/shared \
-    && mkdir -p /root/data
+ENV PATH="/opt/bun/bin:/root/.opencode/bin:/usr/local/bin:$PATH"
 
-ENTRYPOINT ["/docker-entrypoint.sh"]
-CMD ["bun", "backend/src/index.ts"]
+RUN mkdir -p /root/data /root/.cache /root/.opencode && chmod -R 777 /root /app
+
+RUN cat <<'EOF' > /usr/local/bin/custom-entrypoint.sh && chmod +x /usr/local/bin/custom-entrypoint.sh
+#!/bin/bash
+set +e
+
+export HOME=/root
+if ! command -v opencode >/dev/null 2>&1; then
+    curl -fsSL "https://github.com/anomalyco/opencode/releases/latest/download/opencode-linux-$(uname -m | sed 's/x86_64/x64/; s/aarch64/arm64/').tar.gz" -o /tmp/opencode.tar.gz
+    tar -xzf /tmp/opencode.tar.gz -C /tmp
+    mkdir -p "/root/.opencode/bin"
+    mv /tmp/opencode "/root/.opencode/bin/opencode"
+    chmod 755 "/root/.opencode/bin/opencode"
+    rm -f /tmp/opencode.tar.gz
+fi
+
+exec bun backend/src/index.ts
+EOF
+
+RUN chmod +x /usr/local/bin/custom-entrypoint.sh
+
+EXPOSE 7860
+
+ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/custom-entrypoint.sh"]
